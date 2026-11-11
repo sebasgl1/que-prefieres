@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import org.json.JSONArray
@@ -12,11 +13,18 @@ import java.security.SecureRandom
 
 data class Question(val id: String, val categoria: String, val a: String, val b: String)
 
+enum class Mode { VOTACION, ADIVINA }
+
+/** Fases del modo "¿Qué elegiría…?". */
+enum class Phase { PASS, SECRET, GUESS, REVEAL }
+
 sealed class Screen {
     data object Home : Screen()
+    data object Players : Screen()
     data object Categories : Screen()
     data object Custom : Screen()
     data object Play : Screen()
+    data object Summary : Screen()
 }
 
 const val MIAS = "Mis preguntas"
@@ -26,6 +34,9 @@ val CATEGORY_EMOJI = mapOf(
     "Plata y trabajo" to "💸", "Comida" to "🍕", "Tecnología" to "📱", "Colombianas" to "🇨🇴",
     "Picante" to "🌶️", MIAS to "✍️",
 )
+
+data class PairStat(val p1: String, val p2: String, val pct: Int, val n: Int)
+data class PlayerStat(val name: String, val pct: Int, val n: Int)
 
 class Game(context: Context) {
     private val prefs = context.getSharedPreferences("queprefieres", Context.MODE_PRIVATE)
@@ -40,22 +51,42 @@ class Game(context: Context) {
         else addAll(saved.split("|").filter { it in categories })
     }
     var voting by mutableStateOf(prefs.getBoolean("voting", true))
+    val players = mutableStateListOf<String>().apply {
+        addAll((prefs.getString("players", "") ?: "").split("\n").filter { it.isNotBlank() })
+    }
 
     var screen by mutableStateOf<Screen>(Screen.Home)
+    var mode by mutableStateOf(Mode.VOTACION)
 
-    // Ronda actual
+    // Pregunta actual
     var current by mutableStateOf<Question?>(null)
     var swapped by mutableStateOf(false)
-    var votesA by mutableIntStateOf(0)
-    var votesB by mutableIntStateOf(0)
     var revealed by mutableStateOf(false)
     var played by mutableIntStateOf(0)
     private val history = mutableListOf<Pair<Question, Boolean>>()
+
+    // Votos: anónimos (sin jugadores) o con nombre
+    var anonA by mutableIntStateOf(0)
+    var anonB by mutableIntStateOf(0)
+    val votes = mutableStateMapOf<String, Char>()
+    private val rounds = mutableListOf<Map<String, Char>>()   // votos con nombre de la sesión
+
+    // Modo "¿Qué elegiría…?"
+    var chooser by mutableStateOf("")
+    var secret by mutableStateOf<Char?>(null)
+    var phase by mutableStateOf(Phase.PASS)
+    val scores = mutableStateMapOf<String, Int>()
+    private val chooserTurns = mutableMapOf<String, Int>()
+    private val guessLog = mutableListOf<Triple<String, String, Boolean>>() // adivino, elector, acertó
+
+    val named get() = players.size >= 2
 
     fun all(): List<Question> = builtIn + custom
     fun countIn(cat: String) = all().count { it.categoria == cat }
     private fun pool() = all().filter { it.categoria in enabled }
     fun poolSize() = pool().size
+
+    // ---------- Configuración ----------
 
     fun toggle(cat: String) {
         if (cat in enabled) enabled.remove(cat) else enabled.add(cat)
@@ -64,13 +95,32 @@ class Game(context: Context) {
 
     fun setVotingMode(v: Boolean) { voting = v; save() }
 
-    private fun save() {
-        prefs.edit().putString("enabled", enabled.joinToString("|")).putBoolean("voting", voting).apply()
+    fun addPlayer(raw: String): Boolean {
+        val n = raw.trim().replace("\n", " ")
+        if (n.isEmpty() || players.any { it.equals(n, ignoreCase = true) }) return false
+        players.add(n); save(); return true
     }
 
-    fun startPlaying(): Boolean {
-        if (poolSize() == 0) return false
-        history.clear(); played = 0
+    fun removePlayer(n: String) { players.remove(n); save() }
+
+    private fun save() {
+        prefs.edit()
+            .putString("enabled", enabled.joinToString("|"))
+            .putBoolean("voting", voting)
+            .putString("players", players.joinToString("\n"))
+            .apply()
+    }
+
+    // ---------- Partida ----------
+
+    fun canStart(m: Mode) = poolSize() > 0 && (m == Mode.VOTACION || players.size >= 3)
+
+    fun startPlaying(m: Mode): Boolean {
+        if (!canStart(m)) return false
+        mode = m
+        history.clear(); rounds.clear(); guessLog.clear(); chooserTurns.clear()
+        scores.clear(); players.forEach { scores[it] = 0 }
+        played = 0; current = null
         next()
         screen = Screen.Play
         return true
@@ -92,22 +142,100 @@ class Game(context: Context) {
         prefs.edit().putStringSet("seen", seen).apply()
         current = q
         swapped = rng.nextBoolean()
-        resetVotes()
+        resetRound()
         played++
+        if (mode == Mode.ADIVINA) {
+            // Turnos parejos: elige quien menos veces ha elegido
+            val min = players.minOf { chooserTurns[it] ?: 0 }
+            val cands = players.filter { (chooserTurns[it] ?: 0) == min && it != chooser }.ifEmpty { players.filter { (chooserTurns[it] ?: 0) == min } }
+            chooser = cands[rng.nextInt(cands.size)]
+            chooserTurns[chooser] = (chooserTurns[chooser] ?: 0) + 1
+            phase = Phase.PASS
+        }
     }
 
-    fun canGoBack() = history.isNotEmpty()
+    fun canGoBack() = mode == Mode.VOTACION && history.isNotEmpty()
 
     fun previous() {
         val (q, s) = history.removeLastOrNull() ?: return
-        current = q; swapped = s; resetVotes()
+        current = q; swapped = s; resetRound()
         played = maxOf(1, played - 1)
     }
 
-    private fun resetVotes() { votesA = 0; votesB = 0; revealed = false }
+    private fun resetRound() { anonA = 0; anonB = 0; votes.clear(); revealed = false; secret = null }
 
     fun optionA() = current?.let { if (swapped) it.b else it.a } ?: ""
     fun optionB() = current?.let { if (swapped) it.a else it.b } ?: ""
+
+    fun countA() = if (named && mode == Mode.VOTACION) votes.values.count { it == 'A' } else if (mode == Mode.ADIVINA) votes.values.count { it == 'A' } else anonA
+    fun countB() = if (named && mode == Mode.VOTACION) votes.values.count { it == 'B' } else if (mode == Mode.ADIVINA) votes.values.count { it == 'B' } else anonB
+
+    /** Toca el nombre: sin voto → A → B → sin voto. */
+    fun cycleVote(p: String) {
+        when (votes[p]) {
+            null -> votes[p] = 'A'
+            'A' -> votes[p] = 'B'
+            else -> votes.remove(p)
+        }
+    }
+
+    fun reveal() {
+        revealed = true
+        if (named && votes.isNotEmpty()) rounds.add(votes.toMap())
+    }
+
+    // ---------- "¿Qué elegiría…?" ----------
+
+    fun chooseSecret(c: Char) { secret = c; phase = Phase.GUESS }
+
+    fun guessers() = players.filter { it != chooser }
+
+    /** Revela la elección. Acierto = +1. Si nadie acierta, el que eligió gana +2. */
+    fun revealGuess() {
+        val s = secret ?: return
+        val right = votes.filter { it.value == s }.keys
+        right.forEach { scores[it] = (scores[it] ?: 0) + 1 }
+        if (right.isEmpty() && votes.isNotEmpty()) scores[chooser] = (scores[chooser] ?: 0) + 2
+        votes.forEach { (p, v) -> guessLog.add(Triple(p, chooser, v == s)) }
+        phase = Phase.REVEAL
+    }
+
+    fun nobodyGuessed() = secret != null && votes.isNotEmpty() && votes.none { it.value == secret }
+
+    // ---------- Estadísticas ----------
+
+    fun roundsCount() = rounds.size
+
+    /** % de veces que cada pareja votó lo mismo (mínimo 2 preguntas juntos). */
+    fun affinity(): List<PairStat> {
+        val ps = players.toList(); val out = mutableListOf<PairStat>()
+        for (i in ps.indices) for (j in i + 1 until ps.size) {
+            val both = rounds.filter { ps[i] in it && ps[j] in it }
+            if (both.size < 2) continue
+            val same = both.count { it[ps[i]] == it[ps[j]] }
+            out.add(PairStat(ps[i], ps[j], Math.round(same * 100f / both.size), both.size))
+        }
+        return out
+    }
+
+    /** % de veces que cada jugador quedó en la minoría. */
+    fun minority(): List<PlayerStat> = players.mapNotNull { p ->
+        val mine = rounds.filter { p in it }
+        if (mine.isEmpty()) return@mapNotNull null
+        val inMin = mine.count { r ->
+            val a = r.values.count { it == 'A' }; val b = r.values.count { it == 'B' }
+            a != b && a > 0 && b > 0 && r[p] == (if (a < b) 'A' else 'B')
+        }
+        PlayerStat(p, Math.round(inMin * 100f / mine.size), mine.size)
+    }
+
+    /** Quién adivina mejor a quién (modo "¿Qué elegiría…?"). */
+    fun bestReader(): List<PairStat> = guessLog.groupBy { it.first to it.second }
+        .filter { it.value.size >= 2 }
+        .map { (k, v) -> PairStat(k.first, k.second, Math.round(v.count { it.third } * 100f / v.size), v.size) }
+        .sortedByDescending { it.pct }
+
+    // ---------- Mis preguntas ----------
 
     fun addCustom(a: String, b: String): Boolean {
         val ta = a.trim(); val tb = b.trim()
