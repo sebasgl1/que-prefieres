@@ -21,10 +21,10 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Compilar APK de prueba
+      - name: Pruebas y compilar APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew testDebugUnitTest assembleDebug --stacktrace
 
       # Publica el APK como versión descargable: enlace directo y fijo a la última versión.
       - name: Preparar APK para descargar

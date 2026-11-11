@@ -661,14 +661,14 @@
  },
  {
   "categoria": "Superpoderes",
-  "a": "Hablar con los animales",
-  "b": "Controlar las plantas",
+  "a": "Controlar las plantas",
+  "b": "Controlar los insectos",
   "picante": false
  },
  {
   "categoria": "Superpoderes",
-  "a": "Ser inmortal",
-  "b": "Curar cualquier enfermedad",
+  "a": "Regenerarte de cualquier herida",
+  "b": "Curar a otros con las manos",
   "picante": false
  },
  {

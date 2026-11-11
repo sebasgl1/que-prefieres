@@ -1,5 +1,6 @@
 package io.github.sebasgl1.queprefieres
 
+import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -39,6 +40,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +50,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +60,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
@@ -64,29 +71,71 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 class MainActivity : ComponentActivity() {
+    private lateinit var game: Game
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { QueTheme { App() } }
+        game = Game(applicationContext)
+        setContent { QueTheme { App(game) } }
+    }
+
+    // Guarda la partida por si Android cierra la app en segundo plano
+    override fun onStop() {
+        super.onStop()
+        game.saveState()
+    }
+}
+
+/** Durante la partida: oculta los botones de Android y mantiene la pantalla encendida. */
+@Composable
+fun GameMode(active: Boolean) {
+    val view = LocalView.current
+    LaunchedEffect(active) {
+        val window = (view.context as? Activity)?.window ?: return@LaunchedEffect
+        val bars = WindowCompat.getInsetsController(window, view)
+        if (active) {
+            bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            bars.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            bars.show(WindowInsetsCompat.Type.systemBars())
+        }
+        view.keepScreenOn = active
     }
 }
 
 @Composable
-fun App() {
-    val ctx = LocalContext.current
-    val game = remember { Game(ctx.applicationContext) }
-    BackHandler(enabled = game.screen != Screen.Home) { game.screen = Screen.Home }
+fun App(game: Game) {
+    GameMode(active = game.screen == Screen.Play || game.screen == Screen.Summary)
+    BackHandler(enabled = game.screen != Screen.Home) {
+        when (game.screen) {
+            Screen.Play -> game.askQuit = true
+            Screen.Summary -> game.screen = Screen.Play
+            Screen.Insights -> game.screen = Screen.Categories
+            else -> game.screen = Screen.Home
+        }
+    }
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()) {
         AnimatedContent(targetState = game.screen, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "s") { s ->
             when (s) {
                 Screen.Home -> HomeScreen(game)
                 Screen.Categories -> CategoriesScreen(game)
                 Screen.Custom -> CustomScreen(game)
+                Screen.Insights -> InsightsScreen(game)
                 Screen.Play -> if (game.mode == Mode.ADIVINA) GuessScreen(game) else PlayScreen(game)
                 Screen.Players -> PlayersScreen(game)
                 Screen.Summary -> SummaryScreen(game)
             }
         }
+    }
+    if (game.askQuit) {
+        AlertDialog(
+            onDismissRequest = { game.askQuit = false },
+            title = { Text("¿Salir de la partida?") },
+            text = { Text("Se pierden los puntajes y estadísticas de esta partida. Con \"Fin\" puedes ver el resumen sin salir.") },
+            confirmButton = { TextButton(onClick = { game.quit() }) { Text("Salir") } },
+            dismissButton = { TextButton(onClick = { game.askQuit = false }) { Text("Seguir jugando") } },
+        )
     }
 }
 
@@ -263,6 +312,20 @@ fun CategoriesScreen(game: Game) {
                     }
                     Switch(checked = game.voting, onCheckedChange = { game.setVotingMode(it) })
                 }
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Saltar preguntas disparejas", fontSize = 17.sp)
+                        Muted("Las que casi todos responden igual (90 % con 8 o más votos) · ${game.lopsidedCount()} detectadas", size = 13)
+                    }
+                    Switch(checked = game.avoidLopsided, onCheckedChange = { game.changeAvoidLopsided(it) })
+                }
+                Spacer(Modifier.height(10.dp))
+                GhostButton("🔥 Ver las preguntas más reñidas") { game.screen = Screen.Insights }
             }
         }
     }
@@ -315,14 +378,14 @@ fun CustomScreen(game: Game) {
 @Composable
 fun GameHeader(game: Game, onEnd: () -> Unit) {
     val q = game.current
+    val ctx = LocalContext.current
     Row(verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = { game.screen = Screen.Home }) { Text("✕", fontSize = 20.sp, color = MaterialTheme.colorScheme.onBackground) }
+        TextButton(onClick = { game.askQuit = true }) { Text("✕", fontSize = 20.sp, color = MaterialTheme.colorScheme.onBackground) }
         Spacer(Modifier.weight(1f))
         if (q != null) Box(Modifier.background(MaterialTheme.colorScheme.surface, RoundedCornerShape(99.dp)).padding(horizontal = 12.dp, vertical = 6.dp)) {
             Text("${CATEGORY_EMOJI[q.categoria] ?: ""} ${q.categoria}", fontSize = 13.sp)
         }
         Spacer(Modifier.weight(1f))
-        val ctx = LocalContext.current
         TextButton(onClick = { game.toggleFav() }) { Text(if (game.isFav()) "⭐" else "☆", fontSize = 20.sp, color = if (game.isFav()) Color(0xFFFFC94D) else MaterialTheme.colorScheme.onSurfaceVariant) }
         TextButton(onClick = { shareQuestion(ctx, game) }) { Text("📤", fontSize = 18.sp) }
         TextButton(onClick = onEnd) { Text("Fin", color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -394,25 +457,46 @@ fun OptionCard(
     }
 }
 
-/** Fichas con los nombres: tocar cambia entre sin voto → A → B. */
+/** Fichas con los nombres. Con hidden = true solo se ve quién ya votó, no qué eligió. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun VoteChips(names: List<String>, votes: Map<String, Char>, locked: Boolean, correct: Char? = null, onTap: (String) -> Unit) {
+fun VoteChips(names: List<String>, votes: Map<String, Char>, hidden: Boolean, correct: Char? = null, onTap: (String) -> Unit) {
     FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         names.forEach { n ->
             val v = votes[n]
-            val bg = when (v) { 'A' -> ColorA; 'B' -> ColorB; else -> MaterialTheme.colorScheme.surfaceVariant }
-            val mark = when {
-                correct != null && v != null -> if (v == correct) " ✓" else " ✗"
-                v != null -> " · $v"
-                else -> ""
-            }
+            val bg = if (v == null) MaterialTheme.colorScheme.surfaceVariant else if (hidden) MaterialTheme.colorScheme.primary else if (v == 'A') ColorA else ColorB
+            val mark = if (v == null) "" else if (hidden) " ✓" else if (correct != null) (if (v == correct) " ✓" else " ✗") else " · $v"
             Box(
                 Modifier.clip(RoundedCornerShape(99.dp)).background(bg)
-                    .clickable(enabled = !locked) { onTap(n) }.padding(horizontal = 14.dp, vertical = 9.dp),
+                    .clickable(enabled = hidden && v != null) { onTap(n) }.padding(horizontal = 14.dp, vertical = 9.dp),
             ) { Text(n + mark, color = if (v != null) Ink else MaterialTheme.colorScheme.onBackground, fontWeight = if (v != null) FontWeight.Bold else FontWeight.Normal) }
         }
     }
+}
+
+/** Después de tocar una opción: quién la eligió. Así el voto no queda a la vista. */
+@Composable
+fun NamePicker(side: Char, names: List<String>, votes: Map<String, Char>, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("¿Quién elige $side?", color = if (side == 'A') ColorA else ColorB, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                names.forEach { n ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant).clickable { onPick(n) }
+                            .padding(horizontal = 14.dp, vertical = 13.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(n, fontSize = 17.sp, modifier = Modifier.weight(1f))
+                        if (n in votes) Muted("ya votó · cambiar", size = 12)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
 }
 
 // ---------- Modo Votación ----------
@@ -422,45 +506,49 @@ fun PlayScreen(game: Game) {
     val total = game.countA() + game.countB()
     val showResult = game.voting && game.revealed
     val namedVoting = game.voting && game.named
+    val canVote = game.voting && !game.revealed
+    var picking by remember { mutableStateOf<Char?>(null) }
+    val onA: (() -> Unit)? = if (!canVote) null else if (namedVoting) ({ picking = 'A' }) else ({ game.anonA += 1 })
+    val onB: (() -> Unit)? = if (!canVote) null else if (namedVoting) ({ picking = 'B' }) else ({ game.anonB += 1 })
     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 10.dp)) {
         GameHeader(game) { game.screen = if (game.named && game.roundsCount() > 0) Screen.Summary else Screen.Home }
         Text("¿Qué prefieres?", fontSize = 25.sp, fontWeight = FontWeight.Black, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), textAlign = TextAlign.Center)
-        val anonVote = game.voting && !game.named && !game.revealed
         Cards(
-            game, Modifier.weight(1f),
-            onA = if (anonVote) ({ game.anonA += 1 }) else null,
-            onB = if (anonVote) ({ game.anonB += 1 }) else null,
-            showPct = showResult,
-            badgeA = if (anonVote) game.anonA else 0, badgeB = if (anonVote) game.anonB else 0,
-            onUnA = { if (game.anonA > 0) game.anonA-- }, onUnB = { if (game.anonB > 0) game.anonB-- },
+            game, Modifier.weight(1f), onA = onA, onB = onB, showPct = showResult,
+            badgeA = if (canVote && !namedVoting) game.anonA else 0, badgeB = if (canVote && !namedVoting) game.anonB else 0,
+            onUnA = { if (game.anonA > 0) game.anonA -= 1 }, onUnB = { if (game.anonB > 0) game.anonB -= 1 },
         )
         Spacer(Modifier.height(10.dp))
         if (namedVoting) {
-            VoteChips(game.players, game.votes, locked = game.revealed) { game.cycleVote(it) }
+            VoteChips(game.players, game.votes, hidden = !game.revealed) { game.unvote(it) }
             Spacer(Modifier.height(8.dp))
         }
         if (showResult) {
             val a = game.countA(); val b = game.countB()
             val minSide = if (a < b) 'A' else 'B'
             val minNames = game.votes.filter { it.value == minSide }.keys
-            val msg = when {
-                a == b -> "¡Empate! Que alguien de cada lado defienda su opción 🗣️"
-                a == 0 || b == 0 -> "¡Todos de acuerdo! 🤝"
-                minNames.isNotEmpty() -> "${minNames.joinToString(", ")}: defiendan su opción 🗣️"
-                else -> "La minoría ($minSide) tiene que defender su opción 🗣️"
-            }
+            val msg = if (a == b) "¡Empate! Que alguien de cada lado defienda su opción 🗣️"
+            else if (a == 0 || b == 0) "¡Todos de acuerdo! 🤝"
+            else if (minNames.isNotEmpty()) "${minNames.joinToString(", ")}: defiendan su opción 🗣️"
+            else "La minoría ($minSide) tiene que defender su opción 🗣️"
             Muted(msg, Modifier.fillMaxWidth().padding(bottom = 4.dp), align = TextAlign.Center)
-            game.prevHist?.let { (ha, hb) ->
-                val ht = ha + hb
-                if (ht > 0) {
-                    val win = if (ha >= hb) "A" else "B"
-                    val pct = Math.round(maxOf(ha, hb) * 100f / ht)
-                    Muted("📊 En partidas anteriores: $pct% eligió $win ($ht votos)", Modifier.fillMaxWidth().padding(bottom = 10.dp), align = TextAlign.Center, size = 13)
-                }
-            } ?: Spacer(Modifier.height(6.dp))
+            val ph = game.prevHist
+            if (ph != null && ph.first + ph.second > 0) {
+                val ht = ph.first + ph.second
+                val win = if (ph.first >= ph.second) "A" else "B"
+                val pct = Math.round(maxOf(ph.first, ph.second) * 100f / ht)
+                Muted("📊 En partidas anteriores: $pct% eligió $win ($ht votos)", Modifier.fillMaxWidth().padding(bottom = 10.dp), align = TextAlign.Center, size = 13)
+            } else {
+                Spacer(Modifier.height(6.dp))
+            }
         } else if (game.voting) {
-            val hint = if (namedVoting) "Toquen su nombre: una vez A, dos veces B" else "Toquen la opción que cada uno prefiere"
-            Muted(if (total == 0) hint else "$total ${if (total == 1) "voto" else "votos"}", Modifier.fillMaxWidth().padding(bottom = 10.dp), align = TextAlign.Center)
+            val hint = if (namedVoting) {
+                if (total == 0) "Toca tu opción y luego tu nombre. Los votos se ven al final."
+                else "$total de ${game.players.size} votaron · toca un nombre para quitar su voto"
+            } else {
+                if (total == 0) "Toquen la opción que cada uno prefiere" else "$total ${if (total == 1) "voto" else "votos"}"
+            }
+            Muted(hint, Modifier.fillMaxWidth().padding(bottom = 10.dp), align = TextAlign.Center)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (game.voting && !game.revealed) {
@@ -472,12 +560,17 @@ fun PlayScreen(game: Game) {
             }
         }
     }
+    val side = picking
+    if (side != null) {
+        NamePicker(side, game.players, game.votes, onPick = { game.vote(it, side); picking = null }, onDismiss = { picking = null })
+    }
 }
 
 // ---------- Modo "¿Qué elegiría…?" ----------
 
 @Composable
 fun GuessScreen(game: Game) {
+    var picking by remember { mutableStateOf<Char?>(null) }
     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 10.dp)) {
         GameHeader(game) { game.screen = Screen.Summary }
         when (game.phase) {
@@ -499,10 +592,13 @@ fun GuessScreen(game: Game) {
             }
             Phase.GUESS -> {
                 Text("¿Qué eligió ${game.chooser}?", fontSize = 23.sp, fontWeight = FontWeight.Black, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), textAlign = TextAlign.Center)
-                Cards(game, Modifier.weight(1f), onA = null, onB = null)
+                Cards(game, Modifier.weight(1f), onA = { picking = 'A' }, onB = { picking = 'B' })
                 Spacer(Modifier.height(10.dp))
-                VoteChips(game.guessers(), game.votes, locked = false) { game.cycleVote(it) }
-                Muted("Toquen su nombre: una vez A, dos veces B", Modifier.fillMaxWidth().padding(vertical = 8.dp), align = TextAlign.Center)
+                VoteChips(game.guessers(), game.votes, hidden = true) { game.unvote(it) }
+                Muted(
+                    "Toca lo que crees que eligió y luego tu nombre · ${game.votes.size} de ${game.guessers().size}",
+                    Modifier.fillMaxWidth().padding(vertical = 8.dp), align = TextAlign.Center,
+                )
                 BigButton("Revelar", enabled = game.votes.isNotEmpty()) { game.revealGuess() }
             }
             Phase.REVEAL -> {
@@ -511,7 +607,7 @@ fun GuessScreen(game: Game) {
                     modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), textAlign = TextAlign.Center)
                 Cards(game, Modifier.weight(1f), onA = null, onB = null, chosen = s)
                 Spacer(Modifier.height(10.dp))
-                VoteChips(game.guessers(), game.votes, locked = true, correct = s) {}
+                VoteChips(game.guessers(), game.votes, hidden = false, correct = s) {}
                 val right = game.votes.count { it.value == s }
                 Muted(
                     if (game.nobodyGuessed()) "¡${game.chooser} los engañó a todos! +2 🎭" else "$right ${if (right == 1) "acertó" else "acertaron"} · +1 cada uno",
@@ -523,6 +619,10 @@ fun GuessScreen(game: Game) {
             }
         }
     }
+    val side = picking
+    if (side != null && game.phase == Phase.GUESS) {
+        NamePicker(side, game.guessers(), game.votes, onPick = { game.vote(it, side); picking = null }, onDismiss = { picking = null })
+    }
 }
 
 @Composable
@@ -532,6 +632,49 @@ fun ScoreLine(game: Game) {
         top.joinToString("   ") { "${it.key} ${it.value}" }, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, maxLines = 2,
     )
+}
+
+// ---------- Preguntas más reñidas ----------
+
+@Composable
+fun InsightsScreen(game: Game) {
+    val close = remember { game.closest() }
+    val lop = remember { game.mostLopsided() }
+    Column(Modifier.fillMaxSize()) {
+        TopBar("Preguntas del parche") { game.screen = Screen.Categories }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 22.dp, vertical = 8.dp)) {
+            if (close.isEmpty()) {
+                Muted("Aún no hay suficientes votos. Jueguen en modo Votación y aquí verán cuáles preguntas dividen más al parche.", Modifier.padding(top = 12.dp))
+            } else {
+                Section("🔥 Las más reñidas")
+                close.forEach { QuestionStatRow(it) }
+            }
+            if (lop.isNotEmpty()) {
+                Section("😴 Casi todos eligen lo mismo")
+                lop.forEach { QuestionStatRow(it) }
+            }
+        }
+    }
+}
+
+@Composable
+fun QuestionStatRow(st: QuestionStat) {
+    val t = st.a + st.b
+    val pa = if (t > 0) Math.round(st.a * 100f / t) else 0
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Row {
+            Text(st.q.a, color = ColorA, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text("$pa%", color = ColorA, fontWeight = FontWeight.Bold)
+        }
+        Row {
+            Text(st.q.b, color = ColorB, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text("${100 - pa}%", color = ColorB, fontWeight = FontWeight.Bold)
+        }
+        Muted("$t votos", size = 12)
+    }
 }
 
 // ---------- Resumen ----------
