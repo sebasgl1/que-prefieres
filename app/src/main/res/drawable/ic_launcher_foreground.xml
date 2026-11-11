@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Dos mitades A / B -->
+    <path android:fillColor="#FFFF5F7E" android:pathData="M30,34 L52,34 L52,74 L30,74 Q26,74 26,70 L26,38 Q26,34 30,34 Z" />
+    <path android:fillColor="#FF4FB8FF" android:pathData="M56,34 L78,34 Q82,34 82,38 L82,70 Q82,74 78,74 L56,74 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M39,46 Q39,42 43,42 Q47,42 47,46 Q47,49 44,50 L44,54 L42,54 L42,49 Q45,48.5 45,46 Q45,44 43,44 Q41,44 41,46 Z M42,57 L44,57 L44,59 L42,59 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M65,46 Q65,42 69,42 Q73,42 73,46 Q73,49 70,50 L70,54 L68,54 L68,49 Q71,48.5 71,46 Q71,44 69,44 Q67,44 67,46 Z M68,57 L70,57 L70,59 L68,59 Z" />
+</vector>
