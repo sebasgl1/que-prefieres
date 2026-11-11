@@ -135,7 +135,7 @@ fun HomeScreen(game: Game) {
             Spacer(Modifier.height(16.dp))
             Text("¿Qué prefieres?", fontSize = 38.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
             Spacer(Modifier.height(6.dp))
-            Muted("${game.poolSize()} preguntas · ${if (game.players.isEmpty()) "sin jugadores" else "${game.players.size} jugadores"}", align = TextAlign.Center)
+            Muted("${game.poolSize()} ${if (game.onlyFavs) "favoritas" else "preguntas"} · ${if (game.players.isEmpty()) "sin jugadores" else "${game.players.size} jugadores"}", align = TextAlign.Center)
         }
         ModeCard("🗳️", "Votación", "Todos votan y se ven los porcentajes" + if (game.named) ". Con nombres y estadísticas al final." else ".", ColorA, game.canStart(Mode.VOTACION)) {
             game.startPlaying(Mode.VOTACION)
@@ -218,6 +218,21 @@ fun CategoriesScreen(game: Game) {
     Column(Modifier.fillMaxSize()) {
         TopBar("Categorías") { game.screen = Screen.Home }
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 10.dp)) {
+            item {
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.surface).padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("⭐", fontSize = 24.sp)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Solo favoritas", fontSize = 17.sp)
+                        Muted(if (game.favs.isEmpty()) "Marca preguntas con ☆ mientras juegas" else "${game.favs.size} guardadas · ignora las categorías", size = 13)
+                    }
+                    Switch(checked = game.onlyFavs, enabled = game.favs.isNotEmpty(), onCheckedChange = { game.setOnlyFavs(it) })
+                }
+            }
             items(game.categories) { c ->
                 val on = c in game.enabled
                 Row(
@@ -307,7 +322,10 @@ fun GameHeader(game: Game, onEnd: () -> Unit) {
             Text("${CATEGORY_EMOJI[q.categoria] ?: ""} ${q.categoria}", fontSize = 13.sp)
         }
         Spacer(Modifier.weight(1f))
-        TextButton(onClick = onEnd) { Text("Terminar", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        val ctx = LocalContext.current
+        TextButton(onClick = { game.toggleFav() }) { Text(if (game.isFav()) "⭐" else "☆", fontSize = 20.sp, color = if (game.isFav()) Color(0xFFFFC94D) else MaterialTheme.colorScheme.onSurfaceVariant) }
+        TextButton(onClick = { shareQuestion(ctx, game) }) { Text("📤", fontSize = 18.sp) }
+        TextButton(onClick = onEnd) { Text("Fin", color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 
@@ -431,7 +449,15 @@ fun PlayScreen(game: Game) {
                 minNames.isNotEmpty() -> "${minNames.joinToString(", ")}: defiendan su opción 🗣️"
                 else -> "La minoría ($minSide) tiene que defender su opción 🗣️"
             }
-            Muted(msg, Modifier.fillMaxWidth().padding(bottom = 10.dp), align = TextAlign.Center)
+            Muted(msg, Modifier.fillMaxWidth().padding(bottom = 4.dp), align = TextAlign.Center)
+            game.prevHist?.let { (ha, hb) ->
+                val ht = ha + hb
+                if (ht > 0) {
+                    val win = if (ha >= hb) "A" else "B"
+                    val pct = Math.round(maxOf(ha, hb) * 100f / ht)
+                    Muted("📊 En partidas anteriores: $pct% eligió $win ($ht votos)", Modifier.fillMaxWidth().padding(bottom = 10.dp), align = TextAlign.Center, size = 13)
+                }
+            } ?: Spacer(Modifier.height(6.dp))
         } else if (game.voting) {
             val hint = if (namedVoting) "Toquen su nombre: una vez A, dos veces B" else "Toquen la opción que cada uno prefiere"
             Muted(if (total == 0) hint else "$total ${if (total == 1) "voto" else "votos"}", Modifier.fillMaxWidth().padding(bottom = 10.dp), align = TextAlign.Center)

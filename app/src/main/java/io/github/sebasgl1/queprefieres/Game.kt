@@ -55,6 +55,15 @@ class Game(context: Context) {
         addAll((prefs.getString("players", "") ?: "").split("\n").filter { it.isNotBlank() })
     }
 
+    // Favoritas e historial de votos (se guardan en el celular)
+    val favs = mutableStateListOf<String>().apply {
+        addAll((prefs.getString("favs", "") ?: "").split("|").filter { it.isNotBlank() })
+    }
+    var onlyFavs by mutableStateOf(prefs.getBoolean("onlyFavs", false))
+    private val hist: MutableMap<String, Pair<Int, Int>> = loadHist()
+    /** Votos de partidas anteriores para la pregunta actual (en el orden A/B de la pantalla). */
+    var prevHist by mutableStateOf<Pair<Int, Int>?>(null)
+
     var screen by mutableStateOf<Screen>(Screen.Home)
     var mode by mutableStateOf(Mode.VOTACION)
 
@@ -83,7 +92,7 @@ class Game(context: Context) {
 
     fun all(): List<Question> = builtIn + custom
     fun countIn(cat: String) = all().count { it.categoria == cat }
-    private fun pool() = all().filter { it.categoria in enabled }
+    private fun pool() = if (onlyFavs) all().filter { it.id in favs } else all().filter { it.categoria in enabled }
     fun poolSize() = pool().size
 
     // ---------- Configuración ----------
@@ -102,6 +111,17 @@ class Game(context: Context) {
     }
 
     fun removePlayer(n: String) { players.remove(n); save() }
+
+    fun isFav() = current?.id in favs
+
+    fun toggleFav() {
+        val id = current?.id ?: return
+        if (id in favs) favs.remove(id) else favs.add(id)
+        prefs.edit().putString("favs", favs.joinToString("|")).apply()
+        if (onlyFavs && favs.isEmpty()) setOnlyFavs(false)
+    }
+
+    fun setOnlyFavs(v: Boolean) { onlyFavs = v; prefs.edit().putBoolean("onlyFavs", v).apply() }
 
     private fun save() {
         prefs.edit()
@@ -162,7 +182,7 @@ class Game(context: Context) {
         played = maxOf(1, played - 1)
     }
 
-    private fun resetRound() { anonA = 0; anonB = 0; votes.clear(); revealed = false; secret = null }
+    private fun resetRound() { anonA = 0; anonB = 0; votes.clear(); revealed = false; secret = null; prevHist = null }
 
     fun optionA() = current?.let { if (swapped) it.b else it.a } ?: ""
     fun optionB() = current?.let { if (swapped) it.a else it.b } ?: ""
@@ -180,9 +200,29 @@ class Game(context: Context) {
     }
 
     fun reveal() {
+        if (revealed) return
         revealed = true
         if (named && votes.isNotEmpty()) rounds.add(votes.toMap())
+        recordHistory(countA(), countB())
     }
+
+    /** Guarda los votos con la orientación original de la pregunta (a/b), no la de pantalla. */
+    private fun recordHistory(a: Int, b: Int) {
+        val q = current ?: return
+        val old = hist[q.id]
+        prevHist = old?.let { if (swapped) it.second to it.first else it }
+        val (oa, ob) = if (swapped) b to a else a to b
+        hist[q.id] = ((old?.first ?: 0) + oa) to ((old?.second ?: 0) + ob)
+        val o = JSONObject(); hist.forEach { (k, v) -> o.put(k, "${v.first},${v.second}") }
+        prefs.edit().putString("hist", o.toString()).apply()
+    }
+
+    private fun loadHist(): MutableMap<String, Pair<Int, Int>> = runCatching {
+        val o = JSONObject(prefs.getString("hist", "{}") ?: "{}")
+        o.keys().asSequence().associateWith { k ->
+            val (a, b) = o.getString(k).split(","); a.toInt() to b.toInt()
+        }.toMutableMap()
+    }.getOrElse { mutableMapOf() }
 
     // ---------- "¿Qué elegiría…?" ----------
 
