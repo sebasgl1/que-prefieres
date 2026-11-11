@@ -118,10 +118,10 @@ class Game(context: Context) {
         val id = current?.id ?: return
         if (id in favs) favs.remove(id) else favs.add(id)
         prefs.edit().putString("favs", favs.joinToString("|")).apply()
-        if (onlyFavs && favs.isEmpty()) setOnlyFavs(false)
+        if (onlyFavs && favs.isEmpty()) changeOnlyFavs(false)
     }
 
-    fun setOnlyFavs(v: Boolean) { onlyFavs = v; prefs.edit().putBoolean("onlyFavs", v).apply() }
+    fun changeOnlyFavs(v: Boolean) { onlyFavs = v; prefs.edit().putBoolean("onlyFavs", v).apply() }
 
     private fun save() {
         prefs.edit()

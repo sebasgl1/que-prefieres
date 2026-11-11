@@ -230,7 +230,7 @@ fun CategoriesScreen(game: Game) {
                         Text("Solo favoritas", fontSize = 17.sp)
                         Muted(if (game.favs.isEmpty()) "Marca preguntas con ☆ mientras juegas" else "${game.favs.size} guardadas · ignora las categorías", size = 13)
                     }
-                    Switch(checked = game.onlyFavs, enabled = game.favs.isNotEmpty(), onCheckedChange = { game.setOnlyFavs(it) })
+                    Switch(checked = game.onlyFavs, enabled = game.favs.isNotEmpty(), onCheckedChange = { game.changeOnlyFavs(it) })
                 }
             }
             items(game.categories) { c ->
