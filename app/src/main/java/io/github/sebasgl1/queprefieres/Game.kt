@@ -39,9 +39,9 @@ class Game(context: Context) {
     val categories: List<String> = builtIn.map { it.categoria }.distinct() + MIAS
     val custom = mutableStateListOf<Question>().apply { addAll(loadCustom()) }
     val enabled = mutableStateListOf<String>().apply {
-        val saved = prefs.getString("enabled", null)
-        if (saved == null) addAll(categories.filter { it != "Picante" })
-        else addAll(saved.split("|").filter { it in categories })
+        val saved = prefs.getString("enabled", null)?.split("|")?.filter { it.isNotBlank() }
+        val known = prefs.getString("knownCats", null)?.split("|")?.filter { it.isNotBlank() }
+        addAll(Stats.enabledOnLoad(categories, saved, known))
     }
     var voting by mutableStateOf(prefs.getBoolean("voting", true))
     val players = mutableStateListOf<String>().apply {
@@ -86,7 +86,28 @@ class Game(context: Context) {
     private val guessLog = mutableListOf<Triple<String, String, Boolean>>() // adivino, elector, acertó
 
     init {
+        migrateIds()
         restoreState()
+    }
+
+    /**
+     * Antes los ids eran por posición en la librería ("q0", "q1"…): agregar o quitar preguntas
+     * corría favoritas e historial a otras preguntas. Ahora son por texto; esto pasa los datos viejos.
+     */
+    private fun migrateIds() {
+        if (prefs.getInt("idv", 1) >= 2) return
+        val map = builtIn.mapIndexed { i, q -> "q$i" to q.id }.toMap()
+        for (i in favs.indices) favs[i] = map[favs[i]] ?: favs[i]
+        val newHist = hist.mapKeys { (k, _) -> map[k] ?: k }
+        hist.clear(); hist.putAll(newHist)
+        val e = prefs.edit()
+        e.putString("favs", favs.joinToString("|"))
+        val o = JSONObject()
+        hist.forEach { (k, v) -> o.put(k, "${v.first},${v.second}") }
+        e.putString("hist", o.toString())
+        e.putStringSet("seen", Stats.migrate(prefs.getStringSet("seen", emptySet()) ?: emptySet(), map).toSet())
+        e.remove("state")   // una partida a medias con ids viejos no se retoma
+        e.putInt("idv", 2).apply()
     }
 
     val named get() = players.size >= 2
@@ -139,6 +160,7 @@ class Game(context: Context) {
     private fun save() {
         prefs.edit()
             .putString("enabled", enabled.joinToString("|"))
+            .putString("knownCats", categories.joinToString("|"))
             .putBoolean("voting", voting)
             .putBoolean("avoidLopsided", avoidLopsided)
             .putString("players", players.joinToString("\n"))
@@ -297,7 +319,14 @@ class Game(context: Context) {
         return true
     }
 
-    fun removeCustom(q: Question) { custom.remove(q); saveCustom() }
+    fun removeCustom(q: Question) {
+        custom.remove(q)
+        saveCustom()
+        if (favs.remove(q.id)) {
+            prefs.edit().putString("favs", favs.joinToString("|")).apply()
+            if (onlyFavs && favs.isEmpty()) changeOnlyFavs(false)
+        }
+    }
 
     private fun saveCustom() {
         val arr = JSONArray()
@@ -325,6 +354,7 @@ class Game(context: Context) {
             return
         }
         val o = JSONObject()
+        o.put("t", System.currentTimeMillis())
         o.put("mode", mode.name).put("qid", q.id).put("swapped", swapped).put("revealed", revealed).put("played", played)
         o.put("anonA", anonA).put("anonB", anonB)
         o.put("votes", votesJson(votes))
@@ -363,6 +393,11 @@ class Game(context: Context) {
         val raw = prefs.getString("state", null) ?: return
         try {
             val o = JSONObject(raw)
+            // Una partida abandonada hace más de 6 horas no se retoma
+            if (System.currentTimeMillis() - o.optLong("t", 0L) > RESUME_MS) {
+                prefs.edit().remove("state").apply()
+                return
+            }
             val m = Mode.valueOf(o.getString("mode"))
             val q = all().firstOrNull { it.id == o.getString("qid") }
             if (q == null || (m == Mode.ADIVINA && players.size < 3)) {
@@ -405,12 +440,14 @@ class Game(context: Context) {
     }
 
     companion object {
+        const val RESUME_MS = 6 * 60 * 60 * 1000L
+
         private fun loadBuiltIn(context: Context): List<Question> {
             val text = context.assets.open("preguntas.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
             val arr = JSONArray(text)
             return (0 until arr.length()).map { i ->
                 val o = arr.getJSONObject(i)
-                Question("q$i", o.getString("categoria"), o.getString("a"), o.getString("b"))
+                Question(Stats.questionId(o.getString("categoria"), o.getString("a"), o.getString("b")), o.getString("categoria"), o.getString("a"), o.getString("b"))
             }
         }
     }

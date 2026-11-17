@@ -76,4 +76,21 @@ class StatsTest {
         // Sin historial previo
         assertEquals(2 to 2, Stats.mergeHistory(null, null, 2 to 2))
     }
+
+    @Test fun categoriasNuevasSeActivanSolas() {
+        val all = listOf("Divertidas", "Comida", "Viajes", "Picante")
+        // Primera vez: todo menos Picante
+        assertEquals(listOf("Divertidas", "Comida", "Viajes"), Stats.enabledOnLoad(all, null, null))
+        // El usuario apagó Comida; llega "Viajes" en una actualización: se activa, Comida sigue apagada
+        assertEquals(listOf("Divertidas", "Viajes"), Stats.enabledOnLoad(all, listOf("Divertidas"), listOf("Divertidas", "Comida", "Picante")))
+        // Si la apagó después de conocerla, se respeta
+        assertEquals(listOf("Divertidas"), Stats.enabledOnLoad(all, listOf("Divertidas"), all))
+    }
+
+    @Test fun idsEstablesYMigracion() {
+        val id = Stats.questionId("Comida", "Pizza", "Hamburguesa")
+        assertEquals(id, Stats.questionId("Comida", "Pizza", "Hamburguesa"))
+        assertTrue(id != Stats.questionId("Comida", "Hamburguesa", "Pizza"))
+        assertEquals(listOf("kNuevo", "c123"), Stats.migrate(listOf("q0", "c123"), mapOf("q0" to "kNuevo")))
+    }
 }

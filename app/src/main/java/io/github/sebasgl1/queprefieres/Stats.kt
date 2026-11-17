@@ -16,6 +16,28 @@ data class PlayerStat(val name: String, val pct: Int, val n: Int)
 
 /** Cálculos del juego sin nada de Android, para poder probarlos en cada compilación. */
 object Stats {
+    /** Identificador estable de una pregunta: no cambia si se agregan o quitan otras preguntas. */
+    fun questionId(categoria: String, a: String, b: String): String {
+        val crc = java.util.zip.CRC32()
+        crc.update("$categoria|$a|$b".toByteArray(Charsets.UTF_8))
+        return "k" + java.lang.Long.toHexString(crc.value)
+    }
+
+    /** Cambia los ids viejos (por posición) por los nuevos en una lista de ids guardados. */
+    fun migrate(ids: Collection<String>, map: Map<String, String>): List<String> = ids.map { map[it] ?: it }
+
+    /**
+     * Categorías activas al abrir la app: las guardadas, más las categorías nuevas que trajo
+     * una actualización (excepto Picante, que siempre empieza apagada).
+     */
+    fun enabledOnLoad(all: List<String>, saved: List<String>?, known: List<String>?): List<String> {
+        if (saved == null) return all.filter { it != "Picante" }
+        val kept = saved.filter { it in all }
+        if (known == null) return kept
+        val fresh = all.filter { it !in known && it != "Picante" && it !in kept }
+        return kept + fresh
+    }
+
     /** % de veces que cada pareja votó lo mismo (mínimo 2 preguntas juntos). */
     fun affinity(players: List<String>, rounds: Collection<Map<String, Char>>): List<PairStat> {
         val out = mutableListOf<PairStat>()

@@ -10,6 +10,7 @@ import android.graphics.Typeface
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.text.TextUtils
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.content.FileProvider
 import java.io.File
@@ -39,7 +40,8 @@ fun shareQuestion(context: Context, game: Game) {
         c.drawText(letter, r.left + 44f, r.top + 70f, lp)
         val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { this.color = ink; textSize = if (text.length > 60) 54f else 64f; typeface = bold }
         val width = (r.width() - 120f).toInt()
-        val layout = StaticLayout.Builder.obtain(text, 0, text.length, tp, width).setAlignment(Layout.Alignment.ALIGN_CENTER).build()
+        val layout = StaticLayout.Builder.obtain(text, 0, text.length, tp, width).setAlignment(Layout.Alignment.ALIGN_CENTER)
+            .setMaxLines(if (showPct) 4 else 5).setEllipsize(TextUtils.TruncateAt.END).build()
         val extra = if (showPct) 90f else 0f
         c.save()
         c.translate(r.left + 60f, r.centerY() - (layout.height + extra) / 2f)

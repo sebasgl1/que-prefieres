@@ -26,6 +26,8 @@ class QuestionsTest {
             assertTrue("pregunta $i con opciones iguales", !a.equals(b, ignoreCase = true))
             all.add(a.lowercase()); all.add(b.lowercase())
         }
+        val ids = (0 until qs.length()).map { qs.getJSONObject(it).let { o -> Stats.questionId(o.getString("categoria"), o.getString("a"), o.getString("b")) } }
+        assertEquals("ids repetidos", ids.size, ids.toSet().size)
         val dup = all.groupingBy { it }.eachCount().filter { it.value > 1 }.keys
         assertEquals("opciones repetidas: $dup", 0, dup.size)
     }
