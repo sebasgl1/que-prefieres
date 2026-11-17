@@ -57,6 +57,11 @@ class FlowTest {
             rule.onNodeWithText("67%").assertExists()
             rule.onNodeWithText("33%").assertExists()
             rule.onNodeWithText("Siguiente").performClick()
+            // Pregunta nueva: votos en cero y se puede volver a la anterior después de votar
+            rule.onNodeWithText("Toquen la opción que cada uno prefiere").assertExists()
+            rule.onNodeWithTag("card-B").performClick()
+            rule.onNodeWithText("Ver resultado").performClick()
+            rule.onNodeWithText("100%").assertExists()
             rule.onNodeWithText("Anterior").assertIsEnabled()
         }
     }

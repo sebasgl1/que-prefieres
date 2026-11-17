@@ -35,6 +35,8 @@ import androidx.compose.foundation.layout.systemBarsIgnoringVisibility
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
@@ -192,6 +194,13 @@ fun TopBar(title: String, onBack: () -> Unit) {
 }
 
 
+/** Al salir de una pantalla con campo de texto, cierra el teclado para que no tape los botones. */
+@Composable
+fun HideKeyboardOnExit() {
+    val kb = LocalSoftwareKeyboardController.current
+    DisposableEffect(Unit) { onDispose { kb?.hide() } }
+}
+
 // ---------- Inicio ----------
 
 @Composable
@@ -246,6 +255,7 @@ fun ModeCard(emoji: String, title: String, desc: String, color: Color, enabled: 
 
 @Composable
 fun PlayersScreen(game: Game) {
+    HideKeyboardOnExit()
     var input by remember { mutableStateOf("") }
     val add = { if (game.addPlayer(input)) input = "" }
     Column(Modifier.fillMaxSize()) {
@@ -368,6 +378,7 @@ fun CategoriesScreen(game: Game) {
 
 @Composable
 fun CustomScreen(game: Game) {
+    HideKeyboardOnExit()
     var a by remember { mutableStateOf("") }
     var b by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize()) {
