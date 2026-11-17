@@ -21,17 +21,43 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v5
 
-      - name: Pruebas y compilar APK
+      - name: Pruebas de lógica y compilar APK optimizado
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest assembleDebug --stacktrace
+          ./gradlew testDebugUnitTest assembleRelease assembleDebug assembleDebugAndroidTest --stacktrace
 
-      # Publica el APK como versión descargable: enlace directo y fijo a la última versión.
+      - name: Activar aceleración del emulador
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Pruebas de pantalla en un celular virtual. Luego se instala el APK optimizado
+      # (el mismo que se publica), se abre y se le dan 1500 toques al azar buscando cierres.
+      - name: Pruebas de pantalla en emulador
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 31
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            ./gradlew connectedDebugAndroidTest --stacktrace
+            adb install -r app/build/outputs/apk/release/app-release.apk
+            adb shell am start -W -n io.github.sebasgl1.queprefieres/.MainActivity
+            sleep 3
+            adb shell pidof io.github.sebasgl1.queprefieres
+            adb shell monkey -p io.github.sebasgl1.queprefieres --pct-syskeys 0 -s 42 --throttle 40 1500 > monkey.txt 2>&1 || true
+            tail -5 monkey.txt
+            if grep -qE "CRASH|ANR in|Monkey aborted" monkey.txt; then cat monkey.txt; exit 1; fi
+
       - name: Preparar APK para descargar
         run: |
           VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          cp app/build/outputs/apk/debug/app-debug.apk que-prefieres.apk
+          cp app/build/outputs/apk/release/app-release.apk que-prefieres.apk
+          ls -la que-prefieres.apk
 
       - uses: softprops/action-gh-release@v2
         with:

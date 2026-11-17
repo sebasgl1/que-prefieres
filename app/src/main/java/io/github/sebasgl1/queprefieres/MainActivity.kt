@@ -28,7 +28,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.systemBarsIgnoringVisibility
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -104,6 +114,12 @@ fun GameMode(active: Boolean) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+val StableInsets: WindowInsets
+    @Composable get() = WindowInsets.systemBarsIgnoringVisibility
+        .union(WindowInsets.displayCutout)
+        .union(WindowInsets.ime)
+
 @Composable
 fun App(game: Game) {
     GameMode(active = game.screen == Screen.Play || game.screen == Screen.Summary)
@@ -115,7 +131,11 @@ fun App(game: Game) {
             else -> game.screen = Screen.Home
         }
     }
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()) {
+    // Letra grande: agranda todos los textos sobre el tamaño que ya tenga el celular
+    val density = LocalDensity.current
+    CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * if (game.bigText) 1.2f else 1f)) {
+    // Márgenes fijos de las barras de Android: así la pantalla no salta cuando se ocultan en el modo juego
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(StableInsets)) {
         AnimatedContent(targetState = game.screen, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "s") { s ->
             when (s) {
                 Screen.Home -> HomeScreen(game)
@@ -127,6 +147,7 @@ fun App(game: Game) {
                 Screen.Summary -> SummaryScreen(game)
             }
         }
+    }
     }
     if (game.askQuit) {
         AlertDialog(
@@ -252,7 +273,7 @@ fun PlayersScreen(game: Game) {
                         .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(p, fontSize = 17.sp, modifier = Modifier.weight(1f))
+                    Text(p, fontSize = 17.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     TextButton(onClick = { game.removePlayer(p) }) { Text("✕", color = ColorA) }
                 }
             }
@@ -266,7 +287,7 @@ fun PlayersScreen(game: Game) {
 fun CategoriesScreen(game: Game) {
     Column(Modifier.fillMaxSize()) {
         TopBar("Categorías") { game.screen = Screen.Home }
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 10.dp)) {
+        LazyColumn(Modifier.weight(1f).testTag("cats-list"), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 10.dp)) {
             item {
                 Row(
                     Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(14.dp))
@@ -323,6 +344,18 @@ fun CategoriesScreen(game: Game) {
                         Muted("Las que casi todos responden igual (90 % con 8 o más votos) · ${game.lopsidedCount()} detectadas", size = 13)
                     }
                     Switch(checked = game.avoidLopsided, onCheckedChange = { game.changeAvoidLopsided(it) })
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Letra grande", fontSize = 17.sp)
+                        Muted("Textos más grandes en toda la app", size = 13)
+                    }
+                    Switch(checked = game.bigText, onCheckedChange = { game.changeBigText(it) }, modifier = Modifier.testTag("big-text"))
                 }
                 Spacer(Modifier.height(10.dp))
                 GhostButton("🔥 Ver las preguntas más reñidas") { game.screen = Screen.Insights }
@@ -381,11 +414,12 @@ fun GameHeader(game: Game, onEnd: () -> Unit) {
     val ctx = LocalContext.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = { game.askQuit = true }) { Text("✕", fontSize = 20.sp, color = MaterialTheme.colorScheme.onBackground) }
-        Spacer(Modifier.weight(1f))
-        if (q != null) Box(Modifier.background(MaterialTheme.colorScheme.surface, RoundedCornerShape(99.dp)).padding(horizontal = 12.dp, vertical = 6.dp)) {
-            Text("${CATEGORY_EMOJI[q.categoria] ?: ""} ${q.categoria}", fontSize = 13.sp)
+        // La categoría ocupa el espacio que sobra y se recorta con "…" si no cabe
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            if (q != null) Box(Modifier.background(MaterialTheme.colorScheme.surface, RoundedCornerShape(99.dp)).padding(horizontal = 12.dp, vertical = 6.dp)) {
+                Text("${CATEGORY_EMOJI[q.categoria] ?: ""} ${q.categoria}", fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
-        Spacer(Modifier.weight(1f))
         TextButton(onClick = { game.toggleFav() }) { Text(if (game.isFav()) "⭐" else "☆", fontSize = 20.sp, color = if (game.isFav()) Color(0xFFFFC94D) else MaterialTheme.colorScheme.onSurfaceVariant) }
         TextButton(onClick = { shareQuestion(ctx, game) }) { Text("📤", fontSize = 18.sp) }
         TextButton(onClick = onEnd) { Text("Fin", color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -429,7 +463,7 @@ fun OptionCard(
     val dim = highlight == false
     val solid = !showResult && !dim
     Box(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+        modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).testTag("card-$letter")
             .background(if (solid) color else MaterialTheme.colorScheme.surface)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
     ) {
@@ -484,7 +518,7 @@ fun NamePicker(side: Char, names: List<String>, votes: Map<String, Char>, onPick
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 names.forEach { n ->
                     Row(
-                        Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(12.dp))
+                        Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(12.dp)).testTag("pick-$n")
                             .background(MaterialTheme.colorScheme.surfaceVariant).clickable { onPick(n) }
                             .padding(horizontal = 14.dp, vertical = 13.dp),
                         verticalAlignment = Alignment.CenterVertically,

@@ -54,6 +54,7 @@ class Game(context: Context) {
     }
     var onlyFavs by mutableStateOf(prefs.getBoolean("onlyFavs", false))
     var avoidLopsided by mutableStateOf(prefs.getBoolean("avoidLopsided", true))
+    var bigText by mutableStateOf(prefs.getBoolean("bigText", false))
     private val hist: MutableMap<String, Pair<Int, Int>> = loadHist()
     /** Lo que esta partida ya sumó al historial por pregunta, para no contarla dos veces. */
     private val sessionHist = mutableMapOf<String, Pair<Int, Int>>()
@@ -138,6 +139,8 @@ class Game(context: Context) {
 
     fun changeAvoidLopsided(v: Boolean) { avoidLopsided = v; save() }
 
+    fun changeBigText(v: Boolean) { bigText = v; save() }
+
     fun addPlayer(raw: String): Boolean {
         val n = raw.trim().replace("\n", " ")
         if (n.isEmpty() || players.any { it.equals(n, ignoreCase = true) }) return false
@@ -163,6 +166,7 @@ class Game(context: Context) {
             .putString("knownCats", categories.joinToString("|"))
             .putBoolean("voting", voting)
             .putBoolean("avoidLopsided", avoidLopsided)
+            .putBoolean("bigText", bigText)
             .putString("players", players.joinToString("\n"))
             .apply()
     }
