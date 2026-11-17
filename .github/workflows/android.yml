@@ -33,7 +33,8 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       # Pruebas de pantalla en un celular virtual. Luego se instala el APK optimizado
-      # (el mismo que se publica), se abre y se le dan 1500 toques al azar buscando cierres.
+      # (el mismo que se publica), se abre y se le dan 1500 toques al azar buscando cierres de la app
+      # (los del sistema del emulador no cuentan).
       - name: Pruebas de pantalla en emulador
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -48,9 +49,12 @@ jobs:
             adb shell am start -W -n io.github.sebasgl1.queprefieres/.MainActivity
             sleep 3
             adb shell pidof io.github.sebasgl1.queprefieres
-            adb shell monkey -p io.github.sebasgl1.queprefieres --pct-syskeys 0 -s 42 --throttle 40 1500 > monkey.txt 2>&1 || true
-            tail -5 monkey.txt
-            if grep -qE "CRASH|ANR in|Monkey aborted" monkey.txt; then cat monkey.txt; exit 1; fi
+            adb logcat -c
+            adb shell monkey -p io.github.sebasgl1.queprefieres --pct-syskeys 0 --ignore-crashes --ignore-timeouts -s 42 --throttle 40 1500 > monkey.txt 2>&1 || true
+            tail -3 monkey.txt
+            adb logcat -d -b crash > crash.txt || true
+            if grep -qE "CRASH: io.github.sebasgl1.queprefieres|ANR in io.github.sebasgl1.queprefieres" monkey.txt || grep -q "Process: io.github.sebasgl1.queprefieres" crash.txt; then cat monkey.txt crash.txt; exit 1; fi
+            echo "Sin cierres de la app"
 
       - name: Preparar APK para descargar
         run: |
